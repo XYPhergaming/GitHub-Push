@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub সরাসরি Push</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-gray-900 to-gray-800 min-h-screen flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-xl">
+    <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">⬆️ GitHub Direct Push</h1>
+    <p class="text-sm text-center text-gray-500 mb-6">স্থানীয় ফাইল সিলেক্ট করে সরাসরি GitHub-এ পুশ</p>
+
+    <!-- ফর্ম -->
+    <div class="space-y-4">
+      <!-- Token -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700">🔐 Personal Access Token</label>
+        <input id="token" type="password" placeholder="ghp_xxxxxxxxxxxx" 
+               class="w-full border border-gray-300 rounded-xl px-4 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-purple-400">
+      </div>
+      <!-- Owner -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700">👤 Owner (ইউজারনেম)</label>
+        <input id="owner" type="text" placeholder="তোমার GitHub username" 
+               class="w-full border border-gray-300 rounded-xl px-4 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-purple-400">
+      </div>
+      <!-- Repo -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700">📦 Repository নাম</label>
+        <input id="repo" type="text" placeholder="যেমন: my-project" 
+               class="w-full border border-gray-300 rounded-xl px-4 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-purple-400">
+      </div>
+      <!-- Branch -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700">🌿 Branch (ডিফল্ট: main)</label>
+        <input id="branch" type="text" value="main" 
+               class="w-full border border-gray-300 rounded-xl px-4 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-purple-400">
+      </div>
+      <!-- Commit message -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700">✏️ Commit message</label>
+        <input id="message" type="text" placeholder="Add files via web push" 
+               class="w-full border border-gray-300 rounded-xl px-4 py-2 mt-1 focus:outline-none focus:ring-2 focus:ring-purple-400">
+      </div>
+      <!-- File selector -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700">📂 ফাইল সিলেক্ট করো (একাধিক)</label>
+        <input id="fileInput" type="file" multiple 
+               class="w-full mt-1 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-purple-100 file:text-purple-700 hover:file:bg-purple-200">
+      </div>
+
+      <!-- Push button -->
+      <button id="pushBtn" 
+              class="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 rounded-xl transition flex items-center justify-center gap-2">
+        <span>⬆️</span> Push to GitHub
+      </button>
+    </div>
+
+    <!-- স্ট্যাটাস -->
+    <div id="status" class="mt-4 text-sm text-center text-gray-600"></div>
+  </div>
+
+  <script>
+    (function() {
+      const pushBtn = document.getElementById('pushBtn');
+      const statusDiv = document.getElementById('status');
+
+      // Helper: set status
+      function setStatus(msg, isError = false) {
+        statusDiv.innerHTML = msg;
+        statusDiv.className = `mt-4 text-sm text-center ${isError ? 'text-red-500' : 'text-gray-600'}`;
+      }
+
+      // Push হ্যান্ডলার
+      pushBtn.addEventListener('click', async () => {
+        const token = document.getElementById('token').value.trim();
+        const owner = document.getElementById('owner').value.trim();
+        const repo = document.getElementById('repo').value.trim();
+        const branch = document.getElementById('branch').value.trim() || 'main';
+        const message = document.getElementById('message').value.trim() || 'Web push commit';
+        const files = document.getElementById('fileInput').files;
+
+        // ভ্যালিডেশন
+        if (!token || !owner || !repo) {
+          setStatus('❌ Token, Owner, Repo অবশ্যই দিতে হবে', true);
+          return;
+        }
+        if (files.length === 0) {
+          setStatus('❌ অন্তত একটি ফাইল সিলেক্ট করো', true);
+          return;
+        }
+
+        setStatus('⏳ Push চলছে...');
+        pushBtn.disabled = true;
+
+        try {
+          // 1. বর্তমান ব্রাঞ্চের সর্বশেষ commit SHA নেওয়া
+          const refUrl = `https://api.github.com/repos/${owner}/${repo}/git/ref/heads/${branch}`;
+          const refRes = await fetch(refUrl, {
+            headers: { Authorization: `token ${token}` }
+          });
+          if (!refRes.ok) throw new Error(`Branch fetch failed: ${refRes.status} ${await refRes.text()}`);
+          const refData = await refRes.json();
+          const baseCommitSha = refData.object.sha;
+
+          // 2. প্রতিটি ফাইলের জন্য blob তৈরি করা
+          const blobs = [];
+          for (const file of files) {
+            // ফাইল কন্টেন্ট read করে base64 করা
+            const arrayBuffer = await file.arrayBuffer();
+            const bytes = new Uint8Array(arrayBuffer);
+            let binary = '';
+            bytes.forEach(b => binary += String.fromCharCode(b));
+            const base64 = btoa(binary);
+
+            const blobUrl = `https://api.github.com/repos/${owner}/${repo}/git/blobs`;
+            const blobRes = await fetch(blobUrl, {
+              method: 'POST',
+              headers: {
+                Authorization: `token ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                content: base64,
+                encoding: 'base64'
+              })
+            });
+            if (!blobRes.ok) throw new Error(`Blob creation failed for ${file.name}`);
+            const blobData = await blobRes.json();
+            blobs.push({
+              path: file.name,
+              sha: blobData.sha
+            });
+          }
+
+          // 3. ট্রি (tree) তৈরি করা
+          const treeItems = blobs.map(b => ({
+            path: b.path,
+            mode: '100644', // regular file
+            type: 'blob',
+            sha: b.sha
+          }));
+
+          const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees`;
+          const treeRes = await fetch(treeUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: `token ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              base_tree: baseCommitSha,
+              tree: treeItems
+            })
+          });
+          if (!treeRes.ok) throw new Error('Tree creation failed');
+          const treeData = await treeRes.json();
+
+          // 4. কমিট তৈরি করা
+          const commitUrl = `https://api.github.com/repos/${owner}/${repo}/git/commits`;
+          const commitRes = await fetch(commitUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: `token ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              message: message,
+              tree: treeData.sha,
+              parents: [baseCommitSha]
+            })
+          });
+          if (!commitRes.ok) throw new Error('Commit creation failed');
+          const commitData = await commitRes.json();
+
+          // 5. ব্রাঞ্চ আপডেট করা (পুশ)
+          const patchUrl = `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`;
+          const patchRes = await fetch(patchUrl, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `token ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ sha: commitData.sha })
+          });
+          if (!patchRes.ok) throw new Error('Branch update failed');
+
+          setStatus(`✅ সফলভাবে ${files.length}টি ফাইল পুশ হয়েছে GitHub-এ!`);
+        } catch (err) {
+          console.error(err);
+          setStatus(`❌ ত্রুটি: ${err.message}`, true);
+        } finally {
+          pushBtn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
